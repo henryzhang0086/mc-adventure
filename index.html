@@ -32,21 +32,24 @@
   /* 移动端虚拟按键 */
   #touch{ position:fixed; inset:0; display:none; pointer-events:none; z-index:20; touch-action:none;}
   .btn{
-    position:absolute; bottom:calc(18px + env(safe-area-inset-bottom, 0px)); pointer-events:auto;
-    width:64px; height:64px; border-radius:12px;
-    background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.3);
-    color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
+    position:absolute; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); pointer-events:auto;
+    width:72px; height:72px; border-radius:14px;
+    background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.34);
+    color:#fff; font-size:30px; display:flex; align-items:center; justify-content:center;
     backdrop-filter:blur(2px);
+    transition:transform .05s ease, background .05s ease, border-color .05s ease;
     /* 关键: 关闭浏览器对按钮的手势(平移/缩放/长按), 否则横屏按左右时触摸会被当成滚动而失效 */
     touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
   }
-  #bL{left:calc(18px + env(safe-area-inset-left,0px));}
-  #bR{left:calc(96px + env(safe-area-inset-left,0px));}
-  #bJ{right:calc(18px + env(safe-area-inset-right,0px)); bottom:calc(70px + env(safe-area-inset-bottom,0px));}
-  #bA{right:calc(96px + env(safe-area-inset-right,0px));}
-  #bB{right:calc(174px + env(safe-area-inset-right,0px));}
+  /* 按下高亮+回弹, 给触屏明确反馈 */
+  .btn.held, .btn:active{ background:rgba(120,210,255,.45); border-color:#7fd0ff; transform:scale(.9); }
+  #bL{left:calc(20px + env(safe-area-inset-left,0px));}
+  #bR{left:calc(106px + env(safe-area-inset-left,0px));}
+  #bJ{right:calc(20px + env(safe-area-inset-right,0px)); bottom:calc(78px + env(safe-area-inset-bottom,0px));}
+  #bA{right:calc(106px + env(safe-area-inset-right,0px));}
+  #bB{right:calc(192px + env(safe-area-inset-right,0px));}
   #bP{top:calc(14px + env(safe-area-inset-top,0px)); right:calc(14px + env(safe-area-inset-right,0px));
-      bottom:auto; width:48px; height:48px; font-size:20px;}
+      bottom:auto; width:50px; height:50px; font-size:22px;}
   /* 触屏设备: 显示虚拟按键, 并隐藏会遮挡画面的电脑操作提示 */
   @media (pointer:coarse){ #touch{display:block;} #hint{display:none;} }
 </style>

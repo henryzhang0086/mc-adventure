@@ -33,21 +33,24 @@
   /* 移动端虚拟按键 */
   #touch{ position:fixed; inset:0; display:none; pointer-events:none; z-index:20; touch-action:none;}
   .btn{
-    position:absolute; bottom:calc(18px + env(safe-area-inset-bottom, 0px)); pointer-events:auto;
-    width:64px; height:64px; border-radius:12px;
-    background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.3);
-    color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
+    position:absolute; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); pointer-events:auto;
+    width:72px; height:72px; border-radius:14px;
+    background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.34);
+    color:#fff; font-size:30px; display:flex; align-items:center; justify-content:center;
     backdrop-filter:blur(2px);
+    transition:transform .05s ease, background .05s ease, border-color .05s ease;
     /* 关键: 关闭浏览器对按钮的手势(平移/缩放/长按), 否则横屏按左右时触摸会被当成滚动而失效 */
     touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
   }
-  #bL{left:calc(18px + env(safe-area-inset-left,0px));}
-  #bR{left:calc(96px + env(safe-area-inset-left,0px));}
-  #bJ{right:calc(18px + env(safe-area-inset-right,0px)); bottom:calc(70px + env(safe-area-inset-bottom,0px));}
-  #bA{right:calc(96px + env(safe-area-inset-right,0px));}
-  #bB{right:calc(174px + env(safe-area-inset-right,0px));}
+  /* 按下高亮+回弹, 给触屏明确反馈 */
+  .btn.held, .btn:active{ background:rgba(120,210,255,.45); border-color:#7fd0ff; transform:scale(.9); }
+  #bL{left:calc(20px + env(safe-area-inset-left,0px));}
+  #bR{left:calc(106px + env(safe-area-inset-left,0px));}
+  #bJ{right:calc(20px + env(safe-area-inset-right,0px)); bottom:calc(78px + env(safe-area-inset-bottom,0px));}
+  #bA{right:calc(106px + env(safe-area-inset-right,0px));}
+  #bB{right:calc(192px + env(safe-area-inset-right,0px));}
   #bP{top:calc(14px + env(safe-area-inset-top,0px)); right:calc(14px + env(safe-area-inset-right,0px));
-      bottom:auto; width:48px; height:48px; font-size:20px;}
+      bottom:auto; width:50px; height:50px; font-size:22px;}
   /* 触屏设备: 显示虚拟按键, 并隐藏会遮挡画面的电脑操作提示 */
   @media (pointer:coarse){ #touch{display:block;} #hint{display:none;} }
 </style>
@@ -133,6 +136,8 @@ function syncTouches(touchList){
   for(const code in nowHeld){ if(!touchHeld[code]) press[code]=true; keys[code]=true; }  // 新按下
   for(const code in touchHeld){ if(!nowHeld[code]) keys[code]=false; }                   // 已松开
   touchHeld = nowHeld;
+  for(const b of TOUCH_BTNS){ const el=document.getElementById(b.id);   // 按下高亮反馈
+    if(el) el.classList.toggle('held', !!nowHeld[b.code]); }
   return canvasTouch;
 }
 function onTouch(e){
@@ -243,6 +248,76 @@ const SFX = {
   win:   ()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>blip(f,0.18,'square',0.2),i*120));},
   lose:  ()=>{[400,330,260,180].forEach((f,i)=>setTimeout(()=>blip(f,0.22,'sawtooth',0.2),i*150));},
 };
+
+/* ---------------- 背景音乐 (程序化 16 步音序器) ----------------
+   每章一段循环旋律 + 贝斯, Boss 战切换更激烈的曲子。
+   走独立 music 增益再进 master, 因此受全局音量/静音控制。
+   用 Web Audio 提前调度(lookahead)保证节拍稳定, 与渲染帧率无关。*/
+const MUSIC = { gain:null, on:false, cur:null, step:0, nextT:0, timer:null, stepDur:0.15 };
+const TRACKS = {
+  // [melody(16), bass(16)]  0 = 休止
+  overworld:[[523,0,659,0,784,0,659,0, 587,0,523,0,440,0,392,0],
+             [131,0,0,0,165,0,0,0, 147,0,0,0,131,0,0,0]],
+  nether:   [[330,0,0,392,0,0,330,0, 294,0,0,247,0,294,0,0],
+             [110,0,110,0,98,0,98,0, 87,0,87,0,98,0,98,0]],
+  deepdark: [[0,0,392,0,0,0,330,0, 0,0,440,0,0,0,349,0],
+             [65,0,0,0,0,0,0,0, 73,0,0,0,0,0,0,0]],
+  end:      [[440,0,587,0,0,523,0,0, 494,0,659,0,0,587,0,0],
+             [110,0,0,0,147,0,0,0, 123,0,0,0,98,0,0,0]],
+  boss:     [[523,523,0,622,0,523,0,466, 523,0,622,659,0,622,0,587],
+             [131,131,131,131,116,116,116,116, 131,131,131,131,156,156,156,156]],
+};
+function musicSink(){
+  if(!actx) return null;
+  if(!MUSIC.gain){ MUSIC.gain=actx.createGain(); MUSIC.gain.gain.value=0.55; MUSIC.gain.connect(sink()); }
+  return MUSIC.gain;
+}
+function mtone(freq, at, dur, type, vol){
+  try{
+    const a=actx, o=a.createOscillator(), g=a.createGain();
+    o.type=type; o.frequency.setValueAtTime(freq, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(vol, at+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at+dur);
+    o.connect(g); g.connect(musicSink()); o.start(at); o.stop(at+dur+0.02);
+  }catch(e){}
+}
+function scheduleStep(step, at){
+  const tr=TRACKS[MUSIC.cur]; if(!tr) return;
+  const mel=tr[0][step], bas=tr[1][step];
+  if(mel) mtone(mel, at, MUSIC.stepDur*0.9, 'square',   0.11);
+  if(bas) mtone(bas, at, MUSIC.stepDur*1.4, 'triangle', 0.16);
+}
+function musicLoop(){
+  if(!MUSIC.on || !actx){ return; }
+  while(MUSIC.nextT < actx.currentTime + 0.18){
+    scheduleStep(MUSIC.step, MUSIC.nextT);
+    MUSIC.nextT += MUSIC.stepDur;
+    MUSIC.step = (MUSIC.step+1)&15;
+  }
+  MUSIC.timer = setTimeout(musicLoop, 50);
+}
+function playMusic(name){
+  if(!audio() || actx.state!=='running') return;   // 未解锁前不放, 解锁后由 syncMusic 续上
+  if(MUSIC.cur===name && MUSIC.on) return;
+  MUSIC.cur=name; MUSIC.stepDur = name==='boss'?0.115:0.15;
+  if(!MUSIC.on){ MUSIC.on=true; MUSIC.step=0; MUSIC.nextT=actx.currentTime+0.08; musicLoop(); }
+}
+function stopMusic(){ MUSIC.on=false; MUSIC.cur=null; if(MUSIC.timer){ clearTimeout(MUSIC.timer); MUSIC.timer=null; } }
+// 依据当前游戏状态选择应播放的曲目
+function syncMusic(){
+  if(!actx || actx.state!=='running'){ return; }
+  if(G.state==='play' && !G.paused && player && !player.dead){
+    const wkey = ['overworld','nether','deepdark','end'][G.levelIndex] || 'overworld';
+    const want = (boss && !boss.defeated && boss.state==='fight') ? 'boss' : wkey;
+    playMusic(want);
+  } else if(G.state==='play' && G.paused){
+    // 暂停: 维持当前调度但其实节拍继续 — 简单起见停掉, resume 时续上
+    if(MUSIC.on) stopMusic();
+  } else {
+    if(MUSIC.on) stopMusic();
+  }
+}
 
 /* ---------------- 工具 ---------------- */
 const clamp = (v,a,b)=>v<a?a:v>b?b:v;
@@ -368,8 +443,14 @@ const G = {
   paused:false,         // 暂停(仅 play 中有效)
   overlay:null,         // null | 'pause' | 'settings'
   menuIndex:0,          // 菜单选中项
+  // v1.3 juice
+  hitStop:0,            // 顿帧: >0 时冻结逻辑若干"真实帧"以强化打击感
+  look:0,               // 摄像机前瞻偏移(朝向缓动)
+  camSnap:true,         // 关卡/Boss切换后首帧摄像机直接吸附, 不滑入
+  flash:0, flashColor:'255,255,255',  // 全屏闪光(爆炸/击败)
+  combo:0, comboT:0,    // 连击数 / 连击计时
 };
-let player, enemies, projectiles, particles, boss, traps, floaters;
+let player, enemies, projectiles, particles, boss, traps, floaters, floatTexts;
 
 /* ============================================================
    实体
@@ -380,6 +461,7 @@ function makePlayer(x,y){
            jumps:0, attackT:0, attackCD:0, walkAnim:0, dash:0, dashCD:0,
            bowCD:0, bowT:0,        // 弓箭冷却 / 拉弓姿势计时
            coyote:0, jumpBuf:0,   // coyote time / 跳跃缓冲(更顺手的手感)
+           dblL:0, dblR:0,        // 双击方向→冲刺(移动端无 Shift)的计时窗
            win:false };
 }
 
@@ -477,7 +559,7 @@ function updateEnemy(e){
   }
 }
 function creeperExplode(e){
-  e.dead=true; SFX.explode(); G.shake=14;
+  e.dead=true; SFX.explode(); G.shake=14; flash(0.3,'255,150,50'); hitStop(4); vibrate(50);
   burst(e.x+e.w/2, e.y+e.h/2, '#7ac74f', 30, 6);
   burst(e.x+e.w/2, e.y+e.h/2, '#3a3a3a', 18, 5);
   destroyBlocks(e.x+e.w/2, e.y+e.h/2, 1.6);
@@ -501,6 +583,8 @@ function damagePlayer(amount, fromX){
   player.hp -= amount; player.iframe=70; SFX.hurt(); G.shake=8;
   player.vy=-7; player.vx = (player.x<fromX? -6:6);
   burst(player.x+player.w/2, player.y+player.h/2, '#ff5555', 12, 4);
+  popText(player.x+player.w/2, player.y-4, '-'+amount, '#ff5a5a', 17);
+  hitStop(3); flash(0.28,'255,40,40'); vibrate(35); G.combo=0; G.comboT=0;
   if(player.hp<=0){ player.hp=0; killPlayer(); }
 }
 function killPlayer(){
@@ -524,6 +608,38 @@ function updateParticles(){
   for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.18; p.vx*=0.96; p.life--; }
   particles = particles.filter(p=>p.life>0);
 }
+
+/* --- v1.3 打击感: 顿帧 / 闪光 / 震动 --- */
+function hitStop(frames){ if(frames>G.hitStop) G.hitStop=frames; }       // 冻结逻辑若干真实帧
+function flash(amount,color){ if(amount>G.flash){ G.flash=amount; G.flashColor=color||'255,255,255'; } }
+function vibrate(ms){ try{ if(navigator && navigator.vibrate) navigator.vibrate(ms); }catch(e){} }
+
+/* --- 伤害飘字 --- */
+function popText(x,y,text,color,size){
+  floatTexts.push({ x,y, vy:-1.1, life:44, max:44, text:String(text), color:color||'#fff', size:size||16 });
+}
+function updateFloatTexts(){
+  for(const f of floatTexts){ f.y+=f.vy; f.vy*=0.92; f.life--; }
+  floatTexts = floatTexts.filter(f=>f.life>0);
+}
+function drawFloatTexts(){
+  for(const f of floatTexts){
+    const sx=f.x+G.cam.x, sy=f.y+G.cam.y, a=clamp(f.life/f.max,0,1);
+    X.globalAlpha=a; X.textAlign='center';
+    X.font='bold '+f.size+'px "Microsoft YaHei"';
+    X.lineWidth=3; X.strokeStyle='rgba(0,0,0,.85)'; X.strokeText(f.text,sx,sy);
+    X.fillStyle=f.color; X.fillText(f.text,sx,sy);
+  }
+  X.globalAlpha=1; X.textAlign='left';
+}
+
+/* --- 连击 --- */
+function addCombo(){
+  G.combo++; G.comboT=110;
+  if(G.combo>=2){ const bonus=(G.combo-1)*5; G.score+=bonus; }
+  return G.combo;
+}
+function updateCombo(){ if(G.comboT>0){ G.comboT--; if(G.comboT<=0) G.combo=0; } }
 
 /* ============================================================
    BOSS 系统
@@ -549,10 +665,13 @@ function bossHurt(dmg){
   if(boss.iframe>0||boss.dead) return;
   boss.hp-=dmg; boss.iframe=18; boss.flash=10; SFX.hit(); G.shake=6;
   burst(boss.x+boss.w/2, boss.y+boss.h/2, '#ffffff', 8, 4);
+  popText(boss.x+boss.w/2, boss.y-2, '-'+dmg, '#ffd24a', 20);
+  hitStop(3); vibrate(20);
   if(boss.hp<=0) defeatBoss();
 }
 function defeatBoss(){
   boss.hp=0; boss.dead=true; boss.defeated=true; SFX.win(); G.shake=20;
+  hitStop(9); flash(0.5,'255,255,255'); vibrate(140);
   projectiles = projectiles.filter(p=>p.from!=='boss'&&p.from!=='enemy'); // 清空敌方弹幕
   for(const e of enemies) e.dead=true;                                    // 清场小怪, 安全过关
   for(let i=0;i<5;i++) setTimeout(()=>burst(boss.x+rand(0,boss.w),boss.y+rand(0,boss.h),'#ffe680',20,6), i*120);
@@ -697,7 +816,7 @@ function updateProjectiles(){
         if(!e.dead && aabb(p,e)){
           e.hp--; e.flash=8; SFX.hit(); burst(e.x+e.w/2,e.y+e.h/2,'#fff',6,4);
           e.vx=sign(p.vx)*3;
-          if(e.hp<=0){ e.dead=true; killReward(e); }
+          if(e.hp<=0){ e.dead=true; killReward(e); } else popText(e.x+e.w/2,e.y-2,'-1','#fff',13);
           p.life=0; break;
         }
       }
@@ -751,7 +870,7 @@ function updateTraps(){
 }
 function tntExplode(tr){
   tr.done=true; G.lvl.map[tr.r][tr.c]=' ';
-  SFX.explode(); G.shake=16;
+  SFX.explode(); G.shake=16; flash(0.32,'255,120,40'); hitStop(4); vibrate(60);
   const cx=tr.x+TILE/2, cy=tr.y+TILE/2;
   burst(cx,cy,'#ff6a3d',34,7); burst(cx,cy,'#ffd24a',20,6);
   destroyBlocks(cx,cy,2.2);
@@ -779,9 +898,12 @@ function updatePlayer(){
   else p.vx*=fric;
   p.vx=clamp(p.vx,-maxSpd,maxSpd);
 
-  // 冲刺
-  if(tapped('ShiftLeft','ShiftRight') && p.dashCD<=0 && move){
-    p.dash=12; p.dashCD=45; SFX.djump(); }
+  // 冲刺: Shift 键, 或 双击方向(移动端无 Shift, 双击左/右即冲刺)
+  let dashReq = tapped('ShiftLeft','ShiftRight');
+  if(tapped('ArrowRight','KeyD')){ if(p.dblR>0) dashReq=true; p.dblR=16; }
+  if(tapped('ArrowLeft','KeyA')){  if(p.dblL>0) dashReq=true; p.dblL=16; }
+  if(p.dblR>0) p.dblR--; if(p.dblL>0) p.dblL--;
+  if(dashReq && p.dashCD<=0 && move){ p.dash=12; p.dashCD=45; SFX.djump(); vibrate(15); }
   if(p.dash>0){ p.dash--; burst(p.x+p.w/2,p.y+p.h-4,'#aef',2,2); }
 
   // 跳跃(二段) — 带 coyote time + 跳跃缓冲, 手感更跟手
@@ -790,17 +912,17 @@ function updatePlayer(){
   if(p.jumpBuf>0) p.jumpBuf--;
   if(p.coyote>0)  p.coyote--;
   if(p.jumpBuf>0 && (p.onGround || p.coyote>0)){      // 地面/土狼跳(缓冲)
-    p.vy=-12.5; p.jumps=1; p.jumpBuf=0; p.coyote=0; SFX.jump();
+    p.vy=-12.5; p.jumps=1; p.jumpBuf=0; p.coyote=0; SFX.jump(); vibrate(12);
   } else if(jumpTap && !p.onGround && p.coyote<=0 && p.jumps>=1 && p.jumps<2){  // 空中二段跳
-    p.vy=-11; p.jumps=2; p.jumpBuf=0; SFX.djump(); burst(p.x+p.w/2,p.y+p.h,'#fff',8,3);
+    p.vy=-11; p.jumps=2; p.jumpBuf=0; SFX.djump(); burst(p.x+p.w/2,p.y+p.h,'#fff',8,3); vibrate(10);
   }
   // 长按跳更高
   if(down('Space','ArrowUp','KeyW') && p.vy<0) p.vy-=0.35;
 
   p.vy+=0.7; if(p.vy>16)p.vy=16;
 
-  // 攻击(挥剑)
-  if(tapped('KeyJ','Attack') && p.attackCD<=0){
+  // 攻击(挥剑) — 按住可连续挥(冷却控制频率, 手机上不用狂点)
+  if(down('KeyJ','Attack') && p.attackCD<=0){
     p.attackT=12; p.attackCD=22; SFX.sword();
   }
   if(p.attackT>0) p.attackT--;
@@ -808,7 +930,7 @@ function updatePlayer(){
   // 射箭(弓) — K / 移动端🏹按钮
   if(p.bowCD>0) p.bowCD--;
   if(p.bowT>0) p.bowT--;
-  if(tapped('KeyK','Bow') && p.bowCD<=0){
+  if(down('KeyK','Bow') && p.bowCD<=0){
     p.bowCD=26; p.bowT=10; SFX.arrow();
     projectiles.push({ x:p.x+p.w/2, y:p.y+p.h*0.38, vx:p.dir*9, vy:-1.4,
                        w:16, h:5, kind:'arrow', life:90, from:'player' });
@@ -834,8 +956,8 @@ function updatePlayer(){
   if(p.attackT>6){
     const hb={ x: p.dir>0? p.x+p.w-2 : p.x-34, y:p.y+2, w:36, h:p.h-2 };
     for(const e of enemies){ if(!e.dead && aabb(hb,e)){ e.hp--; e.flash=8; SFX.hit();
-        burst(e.x+e.w/2,e.y+e.h/2,'#fff',6,4); e.vx=p.dir*4;
-        if(e.hp<=0){ if(e.type==='creeper'&&e.armed){} e.dead=true; killReward(e);} } }
+        burst(e.x+e.w/2,e.y+e.h/2,'#fff',6,4); e.vx=p.dir*4; vibrate(8);
+        if(e.hp<=0){ e.dead=true; killReward(e);} else popText(e.x+e.w/2,e.y-2,'-1','#fff',13); } }
     if(boss && !boss.dead && boss.state==='fight' && aabb(hb,boss)) bossHurt(2);
   }
 
@@ -858,8 +980,9 @@ function updatePlayer(){
 
   // 收集
   for(const o of G.lvl.emeralds){ if(!o.got && aabb(p,o)){ o.got=true; G.score+=10; SFX.coin();
-      burst(o.x,o.y,'#3df58a',10,4);} }
-  for(const a of G.lvl.apples){ if(!a.got && aabb(p,a)){ a.got=true; healPlayer(2); } }
+      burst(o.x,o.y,'#3df58a',10,4); popText(o.x+12,o.y,'+10','#3df58a',14);} }
+  for(const a of G.lvl.apples){ if(!a.got && aabb(p,a)){ a.got=true; healPlayer(2);
+      popText(a.x+14,a.y,'+❤','#7cff9a',16); } }
 
   // Boss 触发
   if(!G.bossLock && G.lvl.bossTrigger){
@@ -875,6 +998,10 @@ function updatePlayer(){
 }
 function killReward(e){
   G.score+=25; burst(e.x+e.w/2,e.y+e.h/2,'#7ac74f',12,4);
+  const c=addCombo();                          // 连击 +bonus(addCombo 内已计入分数)
+  const gained = 25 + (c>=2?(c-1)*5:0);
+  popText(e.x+e.w/2, e.y-4, '+'+gained, c>=4?'#ffd24a':'#7cff9a', c>=4?18:15);
+  hitStop(2); vibrate(12);
   if(e.type==='creeper'&&e.armed){ creeperExplode(e); }
   if(Math.random()<0.25){ // 偶尔掉绿宝石
     G.lvl.emeralds.push({x:e.x+e.w/2-12,y:e.y,w:24,h:24,t:0,got:false}); }
@@ -884,11 +1011,12 @@ function killReward(e){
 function loadLevel(i){
   G.levelIndex=i; G.lvl=buildLevel(LEVELS[i]);
   player=makePlayer(G.lvl.start.x, G.lvl.start.y);
-  enemies=[]; projectiles=[]; particles=[]; boss=null; floaters=[];
+  enemies=[]; projectiles=[]; particles=[]; boss=null; floaters=[]; floatTexts=[];
   for(const s of G.lvl.spawns) spawnEnemy(s);
   scanTraps();
   G.bossLock=false; G.bossLockX=0; G.cam={x:0,y:0};
   G.paused=false; G.overlay=null;
+  G.hitStop=0; G.look=0; G.camSnap=true; G.flash=0; G.combo=0; G.comboT=0;
   G.message=LEVELS[i].name; G.msgT=160;
 }
 function nextLevel(){
@@ -1245,21 +1373,71 @@ function drawBackground(){
     for(let i=0;i<8;i++){ const px=((i*180 - G.cam.x*0.5)%(VW+200)+VW+200)%(VW+200)-100;
       X.beginPath(); X.moveTo(px,VH); X.lineTo(px+90,VH-120); X.lineTo(px+180,VH); X.fill(); }
   }
+  drawAtmosphere();
 }
 function cloud(x,y){ X.fillRect(x,y,70,18); X.fillRect(x+14,y-12,44,18); X.fillRect(x+30,y-20,30,20); }
+
+/* 天气/氛围微粒(纯程序化, 不分配对象) */
+function drawAtmosphere(){
+  const boss=G.lvl.def.boss, t=G.t;
+  if(boss==='creeper'){            // 草原: 飘落花粉
+    X.fillStyle='rgba(255,255,210,.5)';
+    for(let i=0;i<26;i++){ const x=((i*137 + t*0.4)%(VW+40)+VW+40)%(VW+40)-20;
+      const y=((i*89 + t*1.0)%(VH+40)); X.fillRect(x,y,2,2); }
+  } else if(boss==='wither'){      // 下界: 上升火星
+    for(let i=0;i<24;i++){ const x=((i*101 + Math.sin((t+i*40)*0.02)*22)%(VW+40)+VW+40)%(VW+40)-20;
+      const y=VH-((i*67 + t*1.5)%(VH+40))+20;
+      X.fillStyle='rgba(255,'+(120+(i%3)*45)+',40,.6)'; X.fillRect(x,y,2,3); }
+  } else if(boss==='dragon'){      // 末地: 紫色微尘
+    X.fillStyle='rgba(200,120,255,.5)';
+    for(let i=0;i<24;i++){ const x=((i*149 - t*0.3)%(VW+40)+VW+40)%(VW+40)-20;
+      const y=((i*97 + Math.sin((t+i*30)*0.03)*30 + t*0.5)%(VH+40)+VH+40)%(VH+40)-20;
+      X.fillRect(x,y,2,2); }
+  } else if(boss==='warden'){      // 深暗: 漂浮幽蓝孢子(加密)
+    X.fillStyle='rgba(60,230,200,.45)';
+    for(let i=0;i<22;i++){ const x=((i*113 + Math.sin((t+i*50)*0.02)*16)%(VW+40)+VW+40)%(VW+40)-20;
+      const y=((i*83 - t*0.5)%(VH+40)+VH+40)%(VH+40)-20; X.fillRect(x,y,2,2); }
+  }
+}
+/* 氛围暗角(越阴暗的世界越重) */
+function drawVignette(){
+  const boss=G.lvl.def.boss;
+  const s = boss==='warden'?0.55 : boss==='dragon'?0.42 : boss==='wither'?0.34 : 0.18;
+  const g=X.createRadialGradient(VW/2,VH/2, VH*0.34, VW/2,VH/2, VH*0.92);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,'+s+')');
+  X.fillStyle=g; X.fillRect(0,0,VW,VH);
+}
+/* 连击数显示(屏幕中上, 越高越大越黄) */
+function drawCombo(){
+  if(G.combo<2) return;
+  const a=clamp(G.comboT/110,0,1);
+  const sz=22+Math.min(G.combo,12)*1.6, pop=1+Math.max(0,(G.comboT-95)/15)*0.25;
+  X.save(); X.translate(VW/2, 96); X.scale(pop,pop);
+  X.globalAlpha=clamp(a+0.3,0,1); X.textAlign='center';
+  X.font='bold '+sz+'px "Microsoft YaHei"';
+  X.lineWidth=4; X.strokeStyle='rgba(0,0,0,.8)';
+  const txt='连击 ×'+G.combo;
+  X.strokeText(txt,0,0); X.fillStyle= G.combo>=6?'#ff5a2a': G.combo>=4?'#ffd24a':'#fff';
+  X.fillText(txt,0,0); X.restore(); X.globalAlpha=1; X.textAlign='left';
+}
 
 /* ============================================================
    主渲染
    ============================================================ */
 function render(){
   resetT();
-  // 摄像机
+  // 摄像机: 前瞻(朝移动方向多看一点) + 平滑跟随(关卡切换首帧吸附)
+  const LOOK = 90;
+  G.look += ((player.dir*LOOK) - G.look)*0.06;
   let tx = player.x+player.w/2 - VW/2;
   let ty = player.y+player.h/2 - VH/2 - 40;
   const maxX = G.lvl.pxW - VW, maxY = G.lvl.pxH - VH;
   if(G.bossLock) tx = G.bossLockX;            // Boss 战锁定摄像机
-  G.cam.x = -clamp(tx, 0, Math.max(0,maxX));
-  G.cam.y = -clamp(ty, 0, Math.max(0,maxY));
+  else tx += G.look;
+  const targetX = -clamp(tx, 0, Math.max(0,maxX));
+  const targetY = -clamp(ty, 0, Math.max(0,maxY));
+  if(G.camSnap){ G.cam.x=targetX; G.cam.y=targetY; G.camSnap=false; }
+  else { G.cam.x += (targetX-G.cam.x)*0.16; G.cam.y += (targetY-G.cam.y)*0.22; }
   // 抖动(减衰在 update 中进行, 此处仅取偏移; 关闭"画面震动"则为 0)
   let shx=0,shy=0;
   const mag = SETTINGS.shake ? G.shake : 0;
@@ -1294,8 +1472,12 @@ function render(){
   X.globalAlpha=1;
 
   drawFloaters();
+  drawFloatTexts();           // 伤害/得分飘字(世界坐标)
+  drawVignette();             // 氛围暗角
+  if(G.flash>0){ X.fillStyle='rgba('+G.flashColor+','+clamp(G.flash,0,0.6)+')'; X.fillRect(0,0,VW,VH); }
   if(boss) drawBossBar();     // 屏幕坐标(HUD层), 摄像机变换已恢复
   drawHUD();
+  drawCombo();
 
   // 消息横幅(计时在 update 中递减)
   if(G.msgT>0){
@@ -1326,7 +1508,7 @@ function drawTitle(){
   X.fillText('击败 4 大 Boss：苦力怕之王 · 凋灵 · 监守者 · 末影龙', VW/2, 300);
   X.fillText('小心机关：TNT · 压力板毒箭 · 岩浆 · 尖刺', VW/2, 330);
   X.fillStyle='#cfe'; X.font='14px "Microsoft YaHei"';
-  X.fillText('← → / A D 移动   |   空格/W 跳跃(二段跳)   |   J/鼠标 挥剑   |   K 射箭   |   Shift 冲刺', VW/2, 376);
+  X.fillText('← → 移动 · 空格/W 跳跃(二段) · J 挥剑(按住连击) · K 射箭 · Shift/双击方向 冲刺', VW/2, 376);
   X.fillStyle='#9fd0ff'; X.font='13px "Microsoft YaHei"';
   X.fillText('P / Esc 暂停 · 设置(音量/震动)', VW/2, 400);
   if(SAVE.best>0){ X.fillStyle='#ffe680'; X.font='bold 16px "Microsoft YaHei"';
@@ -1475,8 +1657,9 @@ function stepPlay(){          // 一次固定步长的游戏逻辑
   for(const e of enemies) if(!e.dead) updateEnemy(e);
   enemies = enemies.filter(e=>!e.dead);
   if(boss) updateBoss();
-  updateProjectiles(); updateTraps(); updateParticles();
+  updateProjectiles(); updateTraps(); updateParticles(); updateFloatTexts(); updateCombo();
   if(G.shake>0){ G.shake*=0.86; if(G.shake<0.5) G.shake=0; }
+  if(G.flash>0){ G.flash-=0.06; if(G.flash<0) G.flash=0; }
   if(G.msgT>0) G.msgT--;
 }
 function uiTick(){            // 非游戏/暂停状态: 每帧一次 UI 逻辑
@@ -1502,16 +1685,20 @@ function frame(now){
     if(!lastT) lastT = now;
     const dt = now - lastT; lastT = now;
     if(G.state==='play' && !G.paused){
-      acc += dt; if(acc>250) acc=250;     // 防止卡顿后"死亡螺旋"
-      let steps=0, cleared=false;
-      while(acc>=STEP_MS){
-        stepPlay(); acc-=STEP_MS;
-        if(!cleared){ clearPress(); cleared=true; }   // 单次按键只影响一步
-        if(++steps>=5){ acc=0; break; }
+      if(G.hitStop>0){ G.hitStop--; acc=0; }   // 顿帧: 冻结逻辑只渲染, 强化打击感
+      else {
+        acc += dt; if(acc>250) acc=250;     // 防止卡顿后"死亡螺旋"
+        let steps=0, cleared=false;
+        while(acc>=STEP_MS){
+          stepPlay(); acc-=STEP_MS;
+          if(!cleared){ clearPress(); cleared=true; }   // 单次按键只影响一步
+          if(++steps>=5){ acc=0; break; }
+        }
       }
     } else {
       acc = 0; uiTick(); clearPress();
     }
+    syncMusic();
     draw();
   }catch(err){
     if(!errLogged){ console.error('[MC大冒险] 运行时错误:', err); errLogged=true; drawCrash(err); }
