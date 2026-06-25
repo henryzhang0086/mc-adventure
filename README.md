@@ -2,6 +2,12 @@
 
 一个用 HTML5 Canvas 写的横版闯关游戏（纯前端，零依赖）。把马里奥世界换成《我的世界》：主角是 Steve，反派是 MC 怪物和 4 大 Boss，路上全是 MC 机关。
 
+## 🎮 在线试玩
+
+👉 **<https://henryzhang0086.github.io/mc-adventure/>** （手机扫码或电脑直接打开）
+
+<img src="qr-code.png" width="180" alt="扫码即玩">
+
 ## ▶ 怎么玩
 
 **最简单**：双击 `MC大冒险-单文件版.html`，用浏览器（Chrome / Edge 推荐）打开即可，零安装、零依赖。

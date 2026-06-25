@@ -10,9 +10,18 @@
     "test": "node tests/smoke.mjs",
     "check": "node --check game.js"
   },
-  "keywords": ["game", "canvas", "platformer", "minecraft", "html5"],
+  "keywords": [
+    "game",
+    "canvas",
+    "platformer",
+    "minecraft",
+    "html5"
+  ],
   "license": "MIT",
   "devDependencies": {
     "playwright": "^1.61.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }
