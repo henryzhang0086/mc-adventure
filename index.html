@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>MC 大冒险 — 我的世界版马里奥</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body{
+    height:100%; background:#0b0f14; overflow:hidden;
+    font-family:"Segoe UI","Microsoft YaHei",monospace;
+    -webkit-user-select:none; user-select:none; touch-action:none;
+  }
+  #wrap{
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 30%, #1b2838, #060a0f 80%);
+  }
+  canvas{
+    /* 画布按物理像素超采样渲染(见 game.js fit()), 这里用平滑缩放消除高分屏毛刺;
+       本游戏全部为矢量绘制(无位图素材), 故不需要 pixelated 最近邻 */
+    image-rendering:auto;
+    background:#6ec0ff;
+    box-shadow:0 0 0 4px #1d1d1d, 0 0 40px rgba(0,0,0,.8);
+    max-width:100vw; max-height:100vh;
+    touch-action:none;
+  }
+  #hint{
+    position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
+    color:#9fb4c7; font-size:12px; letter-spacing:1px; pointer-events:none;
+    text-shadow:0 1px 2px #000;
+  }
+  /* 移动端虚拟按键 */
+  #touch{ position:fixed; inset:0; display:none; pointer-events:none; z-index:20; touch-action:none;}
+  .btn{
+    position:absolute; bottom:calc(18px + env(safe-area-inset-bottom, 0px)); pointer-events:auto;
+    width:64px; height:64px; border-radius:12px;
+    background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.3);
+    color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(2px);
+    /* 关键: 关闭浏览器对按钮的手势(平移/缩放/长按), 否则横屏按左右时触摸会被当成滚动而失效 */
+    touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+  }
+  #bL{left:calc(18px + env(safe-area-inset-left,0px));}
+  #bR{left:calc(96px + env(safe-area-inset-left,0px));}
+  #bJ{right:calc(18px + env(safe-area-inset-right,0px)); bottom:calc(70px + env(safe-area-inset-bottom,0px));}
+  #bA{right:calc(96px + env(safe-area-inset-right,0px));}
+  #bB{right:calc(174px + env(safe-area-inset-right,0px));}
+  #bP{top:calc(14px + env(safe-area-inset-top,0px)); right:calc(14px + env(safe-area-inset-right,0px));
+      bottom:auto; width:48px; height:48px; font-size:20px;}
+  /* 触屏设备: 显示虚拟按键, 并隐藏会遮挡画面的电脑操作提示 */
+  @media (pointer:coarse){ #touch{display:block;} #hint{display:none;} }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="960" height="540"></canvas></div>
+<div id="hint">← → / A D 移动 &nbsp;|&nbsp; 空格 / ↑ / W 跳跃(可二段)&nbsp;|&nbsp; J / 鼠标 挥剑 &nbsp;|&nbsp; K 射箭 &nbsp;|&nbsp; Shift 冲刺 &nbsp;|&nbsp; P / Esc 暂停 &nbsp;|&nbsp; Enter 开始/重试</div>
+<div id="touch">
+  <div class="btn" id="bL">◀</div>
+  <div class="btn" id="bR">▶</div>
+  <div class="btn" id="bJ">⤒</div>
+  <div class="btn" id="bA">⚔</div>
+  <div class="btn" id="bB">🏹</div>
+  <div class="btn" id="bP">⏸</div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
