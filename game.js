@@ -99,6 +99,32 @@ addEventListener('mousedown', ()=>{ audio();
 function down(...codes){ return codes.some(c => keys[c]); }
 function tapped(...codes){ return codes.some(c => press[c]); }
 function clearPress(){ for(const k in press) press[k]=false; pointer.justDown=false; }
+
+/* ---------------- 手柄 (Gamepad API) ----------------
+   左摇杆/方向键移动·瞄准 · A 跳 · X/RT 挥剑 · B/Y 射箭 · RB/LB 冲刺 · Start 暂停 */
+let gpHeld = {}, gpConnected = false;
+addEventListener('gamepadconnected', ()=>{ gpConnected=true; });
+function pollGamepad(){
+  if(!navigator.getGamepads) return;
+  const pads = navigator.getGamepads(); let gp=null;
+  for(const p of pads){ if(p){ gp=p; break; } }
+  const now = {};
+  if(gp){ gpConnected=true; const ax=gp.axes||[], bt=gp.buttons||[], bd=i=>bt[i]&&bt[i].pressed;
+    if((ax[0]||0)<-0.4 || bd(14)) now['ArrowLeft']=1;
+    if((ax[0]||0)> 0.4 || bd(15)) now['ArrowRight']=1;
+    if((ax[1]||0)<-0.4 || bd(12)) now['ArrowUp']=1;
+    if((ax[1]||0)> 0.4 || bd(13)) now['ArrowDown']=1;
+    if(bd(0)) now['Space']=1;                         // A 跳
+    if(bd(2)||bd(7)) now['KeyJ']=1;                   // X / RT 挥剑
+    if(bd(1)||bd(3)) now['KeyK']=1;                   // B / Y 射箭
+    if(bd(5)||bd(4)) now['ShiftLeft']=1;              // RB / LB 冲刺
+    if(bd(9)) now['KeyP']=1;                          // Start 暂停
+    if((bd(0)||bd(9)) && (G.state==='title'||G.state==='gameover'||G.state==='clear')) now['Enter']=1;
+  }
+  for(const c in now){ if(!gpHeld[c]) press[c]=true; keys[c]=true; }
+  for(const c in gpHeld){ if(!now[c]) keys[c]=false; }
+  gpHeld = now;
+}
 // UI 按钮命中测试 + 点击消费
 function hit(r){ return pointer.x>=r.x && pointer.x<=r.x+r.w && pointer.y>=r.y && pointer.y<=r.y+r.h; }
 function clicked(r){ return pointer.justDown && hit(r); }
@@ -654,6 +680,7 @@ function burst(x,y,color,n,spd){
 }
 function updateParticles(){
   for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.18; p.vx*=0.96; p.life--; }
+  if(particles.length>520) particles.splice(0, particles.length-520);   // 上限保护(防 GC 抖动)
   particles = particles.filter(p=>p.life>0);
 }
 
@@ -1958,6 +1985,7 @@ function frame(now){
   try{
     if(!lastT) lastT = now;
     const dt = now - lastT; lastT = now;
+    pollGamepad();
     if(G.state==='play' && !G.paused){
       if(G.hitStop>0){ G.hitStop--; acc=0; }   // 顿帧: 冻结逻辑只渲染, 强化打击感
       else {
