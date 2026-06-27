@@ -1696,8 +1696,8 @@ function render(){
   // 摄像机: 前瞻(朝移动方向多看一点) + 平滑跟随(关卡切换首帧吸附)
   const LOOK = 90;
   G.look += ((player.dir*LOOK) - G.look)*0.06;
-  let tx = player.x+player.w/2 - VW/2;
-  let ty = player.y+player.h/2 - VH/2 - 40;
+  let tx = ipx(player)+player.w/2 - VW/2;    // 跟随插值后的玩家位置 -> 镜头也丝滑
+  let ty = ipy(player)+player.h/2 - VH/2 - 40;
   const maxX = G.lvl.pxW - VW, maxY = G.lvl.pxH - VH;
   if(G.bossLock) tx = G.bossLockX;            // Boss 战锁定摄像机
   else tx += G.look;
@@ -1724,13 +1724,13 @@ function render(){
   // 机关 / 收集 / 怪 / boss (屏幕坐标系, 已含cam)
   drawTraps(); drawCollectibles();
   X.save(); X.translate(G.cam.x+shx, G.cam.y+shy);
-  for(const e of enemies) if(!e.dead) drawEnemy(e);
+  for(const e of enemies) if(!e.dead) withInterp(e, ()=>drawEnemy(e));
   X.restore();
 
-  if(boss){ X.save(); X.translate(G.cam.x+shx, G.cam.y+shy); drawBoss(); X.restore(); }
+  if(boss){ X.save(); X.translate(G.cam.x+shx, G.cam.y+shy); withInterp(boss, ()=>drawBoss()); X.restore(); }
 
   // 玩家
-  X.save(); X.translate(G.cam.x+shx, G.cam.y+shy); drawSteve(player); X.restore();
+  X.save(); X.translate(G.cam.x+shx, G.cam.y+shy); withInterp(player, ()=>drawSteve(player)); X.restore();
 
   drawProjectiles();
   // 粒子
@@ -1932,8 +1932,21 @@ function roundRect(x,y,w,h,r){
 const STEP_MS = 1000/60;     // 逻辑固定 60Hz
 let acc = 0, lastT = 0, errLogged = false;
 
+/* ---- 渲染插值: 固定 60Hz 逻辑 + 帧间插值, 高刷(120/144Hz)真·丝滑 ----
+   仅插值主要可动体(玩家/敌/Boss); 位移过大(>80px=瞬移/复活/换关)自动跳过, 防残影 */
+let IALPHA = 0;
+function ipx(e){ if(e._ix===undefined) return e.x; const d=e.x-e._ix; return Math.abs(d)>80? e.x : e._ix+d*IALPHA; }
+function ipy(e){ if(e._iy===undefined) return e.y; const d=e.y-e._iy; return Math.abs(d)>80? e.y : e._iy+d*IALPHA; }
+function withInterp(e, fn){ const ox=e.x, oy=e.y; e.x=ipx(e); e.y=ipy(e); fn(); e.x=ox; e.y=oy; }
+function snapInterp(){     // 每个固定步开始: 记录上一帧位置
+  if(player){ player._ix=player.x; player._iy=player.y; }
+  for(const e of enemies) if(!e.dead){ e._ix=e.x; e._iy=e.y; }
+  if(boss){ boss._ix=boss.x; boss._iy=boss.y; }
+}
+
 function stepPlay(){          // 一次固定步长的游戏逻辑
   G.t++;
+  snapInterp();              // 记录上一帧位置(供渲染插值)
   if(tapped('KeyP','Escape') && player && !player.dead && !player.win){ pauseGame(); return; }
   if(tapped('KeyM')){ SETTINGS.muted=!SETTINGS.muted; applyVolume(); persist(); }
   updatePlayer();
@@ -1997,8 +2010,9 @@ function frame(now){
           if(++steps>=5){ acc=0; break; }
         }
       }
+      IALPHA = clamp(acc/STEP_MS, 0, 1);   // 帧间插值因子
     } else {
-      acc = 0; uiTick(); clearPress();
+      acc = 0; IALPHA = 0; uiTick(); clearPress();
     }
     syncMusic();
     draw();
